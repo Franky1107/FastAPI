@@ -1,71 +1,64 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from pymongo import MongoClient
-from bson import ObjectId
-from bson.errors import InvalidId
 
-app = FastAPI(title="My Notes API")
+app = FastAPI()
 
-# --- Connect to MongoDB ---
-client = MongoClient("mongodb://localhost:27017")
-db = client["notes_app"]          # database
-notes_col = db["notes"]           # collection (like a table)
+# fake "database" for now (a plain Python list); MongoDB comes in Phase 2
+notes = [
+    {"id": 1, "title": "Buy milk", "content": "2 litres"},
+    {"id": 2, "title": "Learn FastAPI", "content": "Routes today"},
+]
 
-# --- Models ---
-class NoteIn(BaseModel):
-    title: str = Field(min_length=1, max_length=100)
-    content: str
-    tags: list[str] = []
 
-class Note(NoteIn):
-    id: str                        # Mongo IDs are strings now, not 1, 2, 3
-
-# --- Helpers ---
-def to_note(doc: dict) -> Note:
-    return Note(
-        id=str(doc["_id"]),
-        title=doc["title"],
-        content=doc["content"],
-        tags=doc.get("tags", []),
-    )
-
-def to_object_id(note_id: str) -> ObjectId:
-    try:
-        return ObjectId(note_id)
-    except InvalidId:
-        raise HTTPException(status_code=400, detail="Invalid note id")
-
-# --- Endpoints ---
 @app.get("/")
 def home():
-    return {"message": "Welcome to My Notes API"}
+    return {"message": "Notes API is alive"}
 
-@app.post("/notes", status_code=201)
-def create_note(note: NoteIn) -> Note:
-    result = notes_col.insert_one(note.model_dump())
-    return Note(id=str(result.inserted_id), **note.model_dump())
 
 @app.get("/notes")
-def list_notes(tag: str | None = None, limit: int = 10) -> list[Note]:
-    query = {"tags": tag} if tag else {}
-    return [to_note(doc) for doc in notes_col.find(query).limit(limit)]
+def list_notes(search: str | None = None, skip: int = 0, limit: int = 10):
+    results = notes
+    if search:
+        term = search.lower()
+        results = [
+            note
+            for note in notes
+            if term in note["title"].lower() or term in note["content"].lower()
+        ]
+    return results[skip : skip + limit]
+
+
+@app.post("/notes")
+def create_note():
+    return {"message": "POST /notes reached (we'll accept real data in Step 3)"}
+
+
+@app.get("/about")
+def about():
+    return {"app": "Notes API", "author": "Sourav"}
+
+
+@app.get("/notes/count")
+def count_notes():
+    return {"count": len(notes)}
+
 
 @app.get("/notes/{note_id}")
-def get_note(note_id: str) -> Note:
-    doc = notes_col.find_one({"_id": to_object_id(note_id)})
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Note not found")
-    return to_note(doc)
+def get_note(note_id: int):
+    for note in notes:
+        if note["id"] == note_id:
+            return note
+    raise HTTPException(status_code=404, detail="Note not found")
 
-@app.put("/notes/{note_id}")
-def update_note(note_id: str, note: NoteIn) -> Note:
-    result = notes_col.replace_one({"_id": to_object_id(note_id)}, note.model_dump())
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Note not found")
-    return Note(id=note_id, **note.model_dump())
 
-@app.delete("/notes/{note_id}", status_code=204)
-def delete_note(note_id: str):
-    result = notes_col.delete_one({"_id": to_object_id(note_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Note not found")
+@app.delete("/notes/{note_id}")
+def delete_note(note_id: int):
+    for idx, note in enumerate(notes):
+        if note["id"] == note_id:
+            notes.pop(idx)
+            return {"message": f"Note {note_id} has been deleted"}
+    raise HTTPException(status_code=404, detail="Note not found")
+
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
