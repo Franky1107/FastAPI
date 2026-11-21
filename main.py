@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -39,8 +39,7 @@ def list_notes(search: str | None = None, skip: int = 0, limit: int = 10):
     return results[skip : skip + limit]
 
 
-# now accepts a body and really creates a note
-@app.post("/notes")
+@app.post("/notes", status_code=status.HTTP_201_CREATED)
 def create_note(note: NoteCreate):
     new_id = notes[-1]["id"] + 1 if notes else 1
     new_note = {"id": new_id, "title": note.title, "content": note.content}
@@ -63,16 +62,16 @@ def get_note(note_id: int):
     for note in notes:
         if note["id"] == note_id:
             return note
-    raise HTTPException(status_code=404, detail="Note not found")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
 
-@app.delete("/notes/{note_id}")
+@app.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_note(note_id: int):
     for idx, note in enumerate(notes):
         if note["id"] == note_id:
             notes.pop(idx)
-            return {"message": f"Note {note_id} has been deleted"}
-    raise HTTPException(status_code=404, detail="Note not found")
+            return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
 
 @app.get("/health")
@@ -87,7 +86,7 @@ def update_note(note_id: int, updated: NoteCreate):
             note["title"] = updated.title
             note["content"] = updated.content
             return note
-    raise HTTPException(status_code=404, detail="Note not found")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
 
 @app.patch("/notes/{note_id}")
@@ -102,16 +101,18 @@ def patch_note(note_id: int, changes: NoteUpdate):
                 update_data
             )  # copies keys from update_data,overwriting those keys and leaving the rest alone
             return note
-    raise HTTPException(status_code=404, detail="Note not found")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
 
 @app.patch("/notes/{note_id}")
 def patch_note(note_id: int, changes: NoteUpdate):
     update_data = changes.model_dump(exclude_unset=True)
     if not update_data:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
+        )
     for note in notes:
         if note["id"] == note_id:
             note.update(update_data)
             return note
-    raise HTTPException(status_code=404, detail="Note not found")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
