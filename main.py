@@ -1,33 +1,48 @@
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query, status
+from pydantic import BaseModel, Field  # 🆕 Field
 
 app = FastAPI()
 
-# fake "database" for now (a plain Python list); MongoDB comes in Phase 2
 notes = [
     {"id": 1, "title": "Buy milk", "content": "2 litres"},
     {"id": 2, "title": "Learn FastAPI", "content": "Routes today"},
 ]
 
 
-# the shape of the data a client must send
-class NoteCreate(BaseModel):
+# ---------- models ----------
+class NoteCreate(BaseModel):  # what a client sends to create/replace
+    title: str = Field(min_length=1, max_length=100)  # 🆕
+    content: str = Field(max_length=5000)  # 🆕
+
+
+class NoteUpdate(BaseModel):  # what a client sends to patch
+    title: str | None = Field(default=None, min_length=1, max_length=100)  # 🆕
+    content: str | None = Field(default=None, max_length=5000)  # 🆕
+
+
+class NoteOut(BaseModel):  # 🆕 what the API sends back
+    id: int
     title: str
     content: str
 
 
-class NoteUpdate(BaseModel):
-    title: str | None = None
-    content: str | None = None
-
-
+# ---------- routes ----------
 @app.get("/")
 def home():
     return {"message": "Notes API is alive"}
 
 
-@app.get("/notes")
-def list_notes(search: str | None = None, skip: int = 0, limit: int = 10):
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
+
+@app.get("/notes", response_model=list[NoteOut])  # 🆕
+def list_notes(
+    search: str | None = Query(default=None, min_length=1),  # 🆕
+    skip: int = Query(default=0, ge=0),  # 🆕
+    limit: int = Query(default=10, ge=1, le=100),  # 🆕
+):
     results = notes
     if search:
         term = search.lower()
@@ -39,7 +54,20 @@ def list_notes(search: str | None = None, skip: int = 0, limit: int = 10):
     return results[skip : skip + limit]
 
 
-@app.post("/notes", status_code=status.HTTP_201_CREATED)
+@app.get("/notes/count")
+def count_notes():
+    return {"count": len(notes)}
+
+
+@app.get("/notes/{note_id}", response_model=NoteOut)  # 🆕
+def get_note(note_id: int):
+    for note in notes:
+        if note["id"] == note_id:
+            return note
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+
+
+@app.post("/notes", response_model=NoteOut, status_code=status.HTTP_201_CREATED)  # 🆕
 def create_note(note: NoteCreate):
     new_id = notes[-1]["id"] + 1 if notes else 1
     new_note = {"id": new_id, "title": note.title, "content": note.content}
@@ -47,20 +75,24 @@ def create_note(note: NoteCreate):
     return new_note
 
 
-@app.get("/about")
-def about():
-    return {"app": "Notes API", "author": "Sourav"}
-
-
-@app.get("/notes/count")
-def count_notes():
-    return {"count": len(notes)}
-
-
-@app.get("/notes/{note_id}")
-def get_note(note_id: int):
+@app.put("/notes/{note_id}", response_model=NoteOut)  # 🆕
+def update_note(note_id: int, updated: NoteCreate):
     for note in notes:
         if note["id"] == note_id:
+            note["title"] = updated.title
+            note["content"] = updated.content
+            return note
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+
+
+@app.patch("/notes/{note_id}", response_model=NoteOut)  # 🆕
+def patch_note(note_id: int, changes: NoteUpdate):
+    update_data = changes.model_dump(exclude_unset=True, exclude_none=True)  # 🆕 exclude_none
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+    for note in notes:
+        if note["id"] == note_id:
+            note.update(update_data)
             return note
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
@@ -71,48 +103,4 @@ def delete_note(note_id: int):
         if note["id"] == note_id:
             notes.pop(idx)
             return
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
-
-
-@app.get("/health")
-def health():
-    return {"status": "healthy"}
-
-
-@app.put("/notes/{note_id}")
-def update_note(note_id: int, updated: NoteCreate):
-    for note in notes:
-        if note["id"] == note_id:
-            note["title"] = updated.title
-            note["content"] = updated.content
-            return note
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
-
-
-@app.patch("/notes/{note_id}")
-def patch_note(note_id: int, changes: NoteUpdate):
-    for note in notes:
-        if note["id"] == note_id:
-            update_data = changes.model_dump(
-                exclude_unset=True
-            )  # converts pydantic obj to dict
-            # exclude_unset takes only what was sent
-            note.update(
-                update_data
-            )  # copies keys from update_data,overwriting those keys and leaving the rest alone
-            return note
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
-
-
-@app.patch("/notes/{note_id}")
-def patch_note(note_id: int, changes: NoteUpdate):
-    update_data = changes.model_dump(exclude_unset=True)
-    if not update_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
-        )
-    for note in notes:
-        if note["id"] == note_id:
-            note.update(update_data)
-            return note
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
